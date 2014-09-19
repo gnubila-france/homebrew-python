@@ -11,7 +11,7 @@ class Scipy < Formula
   depends_on 'swig' => :build
   depends_on :fortran
   option 'with-openblas', "Use openBLAS instead of Apple's Accelerate Framework"
-  depends_on 'homebrew/science/openblas' => :optional
+  depends_on 'gnubila-france/science/openblas' => :optional
 
   numpy_options = []
   numpy_options << "with-python3" if build.with? "python3"
