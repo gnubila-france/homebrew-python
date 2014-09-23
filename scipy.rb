@@ -75,7 +75,9 @@ class Scipy < Formula
     # these env variables may break the compilation
     # see: http://thread.gmane.org/gmane.comp.python.scientific.user/10391
     ENV.delete "LDFLAGS"
-    ENV.delete "CFLAGS"
+    # FFLAGS must contain -fPIC
+    # https://github.com/scipy/scipy/issues/1012
+    ENV['FFLAGS'] = "-fPIC"
 
     # gfortran is gnu95
     Language::Python.each_python(build) do |python, version|
