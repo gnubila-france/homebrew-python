@@ -36,7 +36,12 @@ class Scipy < Formula
       # Setting ATLAS to None is important to prevent numpy from always
       # linking against Accelerate.framework.
       ENV['ATLAS'] = "None"
-      ENV['BLAS'] = ENV['LAPACK'] = "#{openblas_dir}/lib/libopenblas.dylib"
+      if OS.mac?
+        openblas_lib_name = "libopenblas.dylib"
+      else
+        openblas_lib_name = "libopenblas.so"
+      end
+      ENV['BLAS'] = ENV['LAPACK'] = "#{openblas_dir}/lib/#{openblas_lib_name}"
 
       config << <<-EOS.undent
         [openblas]
@@ -66,6 +71,11 @@ class Scipy < Formula
             if you encounter problems.
         EOS
     end
+
+    # these env variables may break the compilation
+    # see: http://thread.gmane.org/gmane.comp.python.scientific.user/10391
+    ENV.delete "LDFLAGS"
+    ENV.delete "CFLAGS"
 
     # gfortran is gnu95
     Language::Python.each_python(build) do |python, version|
