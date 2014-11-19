@@ -20,6 +20,13 @@ class Scipy < Formula
 
   cxxstdlib_check :skip
 
+  # allow tests to pass on numpy 1.9.1
+  # https://github.com/Homebrew/homebrew-python/issues/178
+  patch do
+    url "https://github.com/scipy/scipy/commit/8b0575.diff"
+    sha1 "b8de832ef4b11cd346c54aabbd68ce5923da64d5"
+  end
+
   def install
     config = <<-EOS.undent
       [DEFAULT]
@@ -61,7 +68,7 @@ class Scipy < Formula
 
     Pathname('site.cfg').write config
 
-    if HOMEBREW_CELLAR.subdirs.map{ |f| File.basename f }.include? 'gfortran'
+    if (HOMEBREW_CELLAR/"gfortran").directory?
         opoo <<-EOS.undent
             It looks like the deprecated gfortran formula is installed.
             This causes build problems with scipy. gfortran is now provided by
@@ -87,18 +94,20 @@ class Scipy < Formula
 
   test do
     Language::Python.each_python(build) do |python, version|
-      system python, "-c", "import scipy; scipy.test()"
+      system python, "-c", "import scipy; assert not scipy.test().failures"
     end
   end
 
   def caveats
-    if build.with? "python" and not Formula['python'].installed?
+    if build.with? "python" and not Formula["python"].installed?
+      homebrew_site_packages = Language::Python.homebrew_site_packages
+      user_site_packages = Language::Python.user_site_packages "python"
       <<-EOS.undent
         If you use system python (that comes - depending on the OS X version -
-        with older versions of numpy, scipy and matplotlib), you actually may
-        have to set the `PYTHONPATH` in order to make the brewed packages come
-        before these shipped packages in Python's `sys.path`.
-            export PYTHONPATH=#{HOMEBREW_PREFIX}/lib/python2.7/site-packages
+        with older versions of numpy, scipy and matplotlib), you may need to
+        ensure that the brewed packages come earlier in Python's sys.path with:
+          mkdir -p #{user_site_packages}
+          echo 'import sys; sys.path.insert(1, "#{homebrew_site_packages}")' >> #{user_site_packages}/homebrew.pth
       EOS
     end
   end
