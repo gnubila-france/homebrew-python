@@ -1,16 +1,22 @@
-require "formula"
-
 class Pillow < Formula
   homepage "https://github.com/python-imaging/Pillow"
-  url "https://github.com/python-pillow/Pillow/archive/2.6.1.tar.gz"
-  sha1 "c86d2346b99e51e39543704905ea2f4cb9f0dea1"
+  url "https://github.com/python-pillow/Pillow/archive/3.2.0.tar.gz"
+  sha256 "eb4b9c2956e38f89d588a0d0af0e27a03f1e1d2be705a828bbd12cfba0b020fa"
   head "https://github.com/python-imaging/Pillow.git"
+
+  bottle do
+    cellar :any
+    sha256 "11e19d84469393946936b84d52476480b088a641c03b54ac203349dc06cd34b9" => :el_capitan
+    sha256 "8738b60b1bc1c946d584c595f349426406ef8c59f083fc92b454bfb05c234fd5" => :yosemite
+    sha256 "3e7c1c8e11c5b56b0aeae3c85def5f924e7f2429be2d0dd38200724bd0eb986c" => :mavericks
+  end
 
   # waiting on upstream resolution of JPEG2000 issues
   # https://github.com/python-pillow/Pillow/issues/767
   # option "with-openjpeg", "Enable JPEG2000 support"
 
-  depends_on :python => :recommended
+  option "without-python", "Build without python2 support"
+
   depends_on :python3 => :optional
   depends_on "freetype"
   depends_on "jpeg"
@@ -21,16 +27,17 @@ class Pillow < Formula
 
   resource "nose" do
     url "https://pypi.python.org/packages/source/n/nose/nose-1.3.3.tar.gz"
-    sha1 "cad94d4c58ce82d35355497a1c869922a603a9a5"
-  end
-
-  def package_installed? python, module_name
-    quiet_system python, "-c", "import #{module_name}"
+    sha256 "b40c2ff268beb85356ada25f626ca0dabc89705f31051649772cf00fc9510326"
   end
 
   def install
     inreplace "setup.py" do |s|
-      s.gsub! "ZLIB_ROOT = None", "ZLIB_ROOT = ('#{MacOS.sdk_path}/usr/lib', '#{MacOS.sdk_path}/usr/include')" unless MacOS::CLT.installed?
+      # Don't automatically detect Tcl or Tk in /Library
+      # Fixes https://github.com/Homebrew/homebrew-python/issues/190
+      s.gsub! '"/Library/Frameworks",', ""
+
+      sdkprefix = MacOS::CLT.installed? ? "" : MacOS.sdk_path
+      s.gsub! "ZLIB_ROOT = None", "ZLIB_ROOT = ('#{sdkprefix}/usr/lib', '#{sdkprefix}/usr/include')"
       s.gsub! "LCMS_ROOT = None", "LCMS_ROOT = ('#{Formula["little-cms2"].opt_prefix}/lib', '#{Formula["little-cms2"].opt_prefix}/include')" if build.with? "little-cms2"
       s.gsub! "JPEG_ROOT = None", "JPEG_ROOT = ('#{Formula["jpeg"].opt_prefix}/lib', '#{Formula["jpeg"].opt_prefix}/include')"
       # s.gsub! "JPEG2K_ROOT = None", "JPEG2K_ROOT = ('#{Formula["openjpeg21"].opt_prefix}/lib', '#{Formula["openjpeg21"].opt_prefix}/include')" if build.with? "openjpeg"
@@ -38,22 +45,22 @@ class Pillow < Formula
       s.gsub! "FREETYPE_ROOT = None", "FREETYPE_ROOT = ('#{Formula["freetype"].opt_prefix}/lib', '#{Formula["freetype"].opt_prefix}/include')"
     end
 
+    # avoid triggering "helpful" distutils code that doesn't recognize Xcode 7 .tbd stubs
+    ENV.delete "SDKROOT"
     ENV.append "CFLAGS", "-I#{MacOS.sdk_path}/System/Library/Frameworks/Tk.framework/Versions/8.5/Headers" unless MacOS::CLT.installed?
 
     Language::Python.each_python(build) do |python, version|
-      unless package_installed?(python, "nose")
-        resource("nose").stage do
-          Language::Python.setup_install python, libexec
-          nose_path = libexec/"lib/python#{version}/site-packages"
-          dest_path = lib/"python#{version}/site-packages"
-          mkdir_p dest_path
-          (dest_path/"homebrew-pillow-nose.pth").atomic_write(nose_path.to_s + "\n")
-          ENV.append_path "PYTHONPATH", nose_path
-        end
+      resource("nose").stage do
+        system python, *Language::Python.setup_install_args(libexec)
+        nose_path = libexec/"lib/python#{version}/site-packages"
+        dest_path = lib/"python#{version}/site-packages"
+        mkdir_p dest_path
+        (dest_path/"homebrew-pillow-nose.pth").atomic_write(nose_path.to_s + "\n")
+        ENV.append_path "PYTHONPATH", nose_path
       end
       # don't accidentally discover openjpeg since it isn't working
       system python, "setup.py", "build_ext", "--disable-jpeg2000" # if build.without? "openjpeg"
-      Language::Python.setup_install python, prefix
+      system python, *Language::Python.setup_install_args(prefix)
     end
 
     prefix.install "Tests"
@@ -61,7 +68,7 @@ class Pillow < Formula
 
   test do
     cp_r prefix/"Tests", testpath
-    Language::Python.each_python(build) do |python, version|
+    Language::Python.each_python(build) do |python, _version|
       system "#{python} -m nose Tests/test_*"
     end
   end

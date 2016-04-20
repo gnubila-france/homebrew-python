@@ -1,41 +1,53 @@
-require 'formula'
-
 class Scipy < Formula
-  homepage 'http://www.scipy.org'
-  url 'https://downloads.sourceforge.net/project/scipy/scipy/0.14.0/scipy-0.14.0.tar.gz'
-  sha1 'faf16ddf307eb45ead62a92ffadc5288a710feb8'
-  head 'https://github.com/scipy/scipy.git'
-  revision 1
+  desc "Software for mathematics, science, and engineering"
+  homepage "http://www.scipy.org"
+  url "https://pypi.python.org/packages/source/s/scipy/scipy-0.17.0.tar.gz"
+  sha256 "f600b755fb69437d0f70361f9e560ab4d304b1b66987ed5a28bdd9dd7793e089"
+  head "https://github.com/scipy/scipy.git"
 
-  depends_on :python => :recommended
+  bottle do
+    sha256 "5ac4e055f2ab97c68b6bbcbcca4e7aca6845440cfc140a68b6b476f88a3a1532" => :el_capitan
+    sha256 "d068254ccede0b4f9d76053e1a0350c56b42ed7f34ea7d81ec0595fb25411e90" => :yosemite
+    sha256 "28689e03334309320f7045a02b1581a9ee4b105ce6205ee5923699cc2d504899" => :mavericks
+  end
+
+  option "without-python", "Build without python2 support"
+
+  depends_on "swig" => :build
+  depends_on :python => :recommended if MacOS.version <= :snow_leopard
   depends_on :python3 => :optional
-  depends_on 'swig' => :build
   depends_on :fortran
-  option 'with-openblas', "Use openBLAS instead of Apple's Accelerate Framework"
-  depends_on 'gnubila-france/science/openblas' => :optional
+
+  option "with-openblas", "Use openblas instead of Apple's Accelerate framework " \
+                          "(required to build with gcc on OS X)"
+  depends_on "gnubila-france/science/openblas" => (OS.mac? ? :optional : :recommended)
 
   numpy_options = []
   numpy_options << "with-python3" if build.with? "python3"
   numpy_options << "with-openblas" if build.with? "openblas"
-  depends_on "numpy" => numpy_options
+  depends_on "gnubila-france/python/numpy" => numpy_options
 
   cxxstdlib_check :skip
 
-  # allow tests to pass on numpy 1.9.1
-  # https://github.com/Homebrew/homebrew-python/issues/178
-  patch do
-    url "https://github.com/scipy/scipy/commit/8b0575.diff"
-    sha1 "b8de832ef4b11cd346c54aabbd68ce5923da64d5"
-  end
+  # https://github.com/Homebrew/homebrew-python/issues/110
+  # There are ongoing problems with gcc+accelerate.
+  fails_with :gcc if OS.mac? && build.without?("openblas")
 
   def install
+    # https://github.com/numpy/numpy/issues/4203
+    # https://github.com/Homebrew/homebrew-python/issues/209
+    # https://github.com/Homebrew/homebrew-python/issues/233
+    if OS.linux?
+      ENV.append "FFLAGS", "-fPIC"
+      ENV.append "LDFLAGS", "-shared"
+    end
+
     config = <<-EOS.undent
       [DEFAULT]
       library_dirs = #{HOMEBREW_PREFIX}/lib
       include_dirs = #{HOMEBREW_PREFIX}/include
-
     EOS
-    if build.with? 'openblas'
+    if build.with? "openblas"
       # For maintainers:
       # Check which BLAS/LAPACK numpy actually uses via:
       # xcrun otool -L $(brew --prefix)/Cellar/scipy/<version>/lib/python2.7/site-packages/scipy/linalg/_flinalg.so
@@ -43,13 +55,13 @@ class Scipy < Formula
       openblas_dir = Formula["openblas"].opt_prefix
       # Setting ATLAS to None is important to prevent numpy from always
       # linking against Accelerate.framework.
-      ENV['ATLAS'] = "None"
+      ENV["ATLAS"] = "None"
       if OS.mac?
         openblas_lib_name = "libopenblas.dylib"
       else
         openblas_lib_name = "libopenblas.so"
       end
-      ENV['BLAS'] = ENV['LAPACK'] = "#{openblas_dir}/lib/#{openblas_lib_name}"
+      ENV["BLAS"] = ENV["LAPACK"] = "#{openblas_dir}/lib/#{openblas_lib_name}"
 
       config << <<-EOS.undent
         [openblas]
@@ -57,50 +69,29 @@ class Scipy < Formula
         library_dirs = #{openblas_dir}/lib
         include_dirs = #{openblas_dir}/include
       EOS
-    else
-      # https://github.com/Homebrew/homebrew-python/issues/110
-      # There are ongoing problems with gcc+accelerate.
-      odie "Please use brew install --with-openblas scipy to compile scipy using gcc." if ENV.compiler =~ /gcc-(4\.[3-9])/
-
-      # https://github.com/Homebrew/homebrew-python/pull/73
-      # Only save for gcc and allows you to `brew install scipy --cc=gcc-4.8`
-      # ENV.append 'CPPFLAGS', '-D__ACCELERATE__' if ENV.compiler =~ /gcc-(4\.[3-9])/
     end
 
-    Pathname('site.cfg').write config
-
-    if (HOMEBREW_CELLAR/"gfortran").directory?
-        opoo <<-EOS.undent
-            It looks like the deprecated gfortran formula is installed.
-            This causes build problems with scipy. gfortran is now provided by
-            the gcc formula. Please run:
-                brew rm gfortran
-                brew install gcc
-            if you encounter problems.
-        EOS
-    end
-
-    # these env variables may break the compilation
-    # see: http://thread.gmane.org/gmane.comp.python.scientific.user/10391
-    ENV.delete "LDFLAGS"
-    # FFLAGS must contain -fPIC
-    # https://github.com/scipy/scipy/issues/1012
-    ENV['FFLAGS'] = "-fPIC"
+    Pathname("site.cfg").write config
 
     # gfortran is gnu95
     Language::Python.each_python(build) do |python, version|
-      system python, "setup.py", "build", "--fcompiler=gnu95", "install", "--prefix=#{prefix}"
+      ENV["PYTHONPATH"] = Formula["numpy"].opt_lib/"python#{version}/site-packages"
+      ENV.prepend_create_path "PYTHONPATH", lib/"python#{version}/site-packages"
+      system python, "setup.py", "build", "--fcompiler=gnu95"
+      system python, *Language::Python.setup_install_args(prefix)
     end
   end
 
-  test do
-    Language::Python.each_python(build) do |python, version|
-      system python, "-c", "import scipy; assert not scipy.test().failures"
+  # cleanup leftover .pyc files from previous installs which can cause problems
+  # see https://github.com/Homebrew/homebrew-python/issues/185#issuecomment-67534979
+  def post_install
+    Language::Python.each_python(build) do |_python, version|
+      rm_f Dir["#{HOMEBREW_PREFIX}/lib/python#{version}/site-packages/scipy/**/*.pyc"]
     end
   end
 
   def caveats
-    if build.with? "python" and not Formula["python"].installed?
+    if (build.with? "python") && !Formula["python"].installed?
       homebrew_site_packages = Language::Python.homebrew_site_packages
       user_site_packages = Language::Python.user_site_packages "python"
       <<-EOS.undent
@@ -113,4 +104,9 @@ class Scipy < Formula
     end
   end
 
+  test do
+    Language::Python.each_python(build) do |python, _version|
+      system python, "-c", "import scipy; assert scipy.test().wasSuccessful()"
+    end
+  end
 end
